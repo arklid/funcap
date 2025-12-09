@@ -1,10 +1,10 @@
 """
 Created on Nov 21, 2012
-Python 3 and IDA 7 port on Sep 9, 2022
+Python 3 and proper IDA 9.x support by Fredric Arklid (arklid @ github)
 
 @author: deresz@gmail.com
-@contributors: Bartol0 @ github
-@version: 0.91
+@contributors: Bartol0 @ github, arklid @ github
+@version: 0.92
 
 FunCap. A script to capture function calls during a debug session in IDA.
 It is created to help quickly importing some runtime data into static IDA database to boost static analysis.
