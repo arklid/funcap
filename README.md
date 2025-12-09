@@ -3,7 +3,7 @@ funcap
 
 __IDA Pro script to add some useful runtime info to static analysis.__
 
-**NEW**: Ported to IDA 7.x and Python3
+**NEW**: Ported to IDA 9.x and Python3
 
 _Overview_
 
@@ -184,6 +184,11 @@ _2022-05-09_
 
 Ported to Python3 and to IDA 7.x API
 
+_2025-12-09_
+
+Added support for IDA 9.x API
+
 __Contact__
 
 [@deresz666](http://twitter/deresz666) - deresz\@gmail.com
+[@arklid](https://arklid.com) - fredric\@arklid.com
