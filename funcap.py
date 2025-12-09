@@ -1,10 +1,10 @@
 """
 Created on Nov 21, 2012
-Python 3 and IDA 7 port on Sep 9, 2022
+Python 3 and proper IDA 9.x support by Fredric Arklid (arklid @ github)
 
 @author: deresz@gmail.com
-@contributors: Bartol0 @ github
-@version: 0.91
+@contributors: Bartol0 @ github, arklid @ github
+@version: 0.92
 
 FunCap. A script to capture function calls during a debug session in IDA.
 It is created to help quickly importing some runtime data into static IDA database to boost static analysis.
@@ -60,16 +60,69 @@ from six.moves import range
 
 
 def format_name(ea):
-    name = get_func_name(ea)
-    if name == "" or name == None:
-        name = "0x%x" % ea
+    """
+    Defensive retrieval of a function name for ea.
+    IDA APIs may have different signatures across versions, so try several
+    alternatives and return a sensible fallback if none work.
+    """
+    if ea is None:
+        return "N/A"
+
+    name = None
+    try:
+        # Preferred: typical IDA API
+        name = get_func_name(int(ea))
+    except TypeError:
+        # get_func_name may have a different SWIG binding in some IDA builds;
+        # fall back to generic name lookup.
+        try:
+            name = get_name(int(ea), ida_name.GN_VISIBLE)
+        except Exception:
+            name = None
+    except Exception:
+        try:
+            name = get_name(int(ea), ida_name.GN_VISIBLE)
+        except Exception:
+            name = None
+
+    if name == "" or name is None:
+        try:
+            return "0x%x" % int(ea)
+        except Exception:
+            return "N/A"
     return name
 
 
 def format_offset(ea):
-    offset = get_func_off_str(ea)
-    if offset == "" or offset == None:
-        offset = "0x%x" % ea
+    """
+    Return a human-friendly function offset string for ea.
+    On IDA 9 some name-formatting functions changed their signatures;
+    call get_func_off_str() defensively and fall back to a simple hex
+    representation if the call fails.
+    This function is defensive: it accepts None and any unexpected return
+    values from IDA APIs and returns 'N/A' in those cases to avoid
+    TypeErrors in callers.
+    """
+    if ea is None:
+        return "N/A"
+
+    offset = None
+    try:
+        offset = get_func_off_str(ea)
+    except TypeError:
+        # Some IDA/IDAPython versions require an extra flags parameter.
+        try:
+            offset = get_func_off_str(ea, 0)
+        except Exception:
+            offset = None
+    except Exception:
+        offset = None
+
+    if offset == "" or offset is None:
+        try:
+            offset = "0x%x" % int(ea)
+        except Exception:
+            offset = "N/A"
     return offset
 
 
@@ -377,13 +430,31 @@ class FunCapHook(DBG_Hooks):
             - get_frame_size(addr)
             + get_func_attr(addr, FUNCATTR_ARGSIZE)
         )
-        return argFrameSize / (self.bits / 8)
+        return argFrameSize // (self.bits // 8)
 
     def get_caller(self):
-        return self.prev_ins(self.return_address())
+        """
+        Safely obtain the caller instruction address.
+        Some debugger read functions may return None or non-int values,
+        so defensively validate and cast the return address before using it.
+        """
+        ret = self.return_address()
+        try:
+            ea = int(ret)
+        except Exception:
+            return None
+        return self.prev_ins(ea)
 
     def format_caller(self, ret):
-        return format_offset(ret) + " (0x%x)" % ret
+        """
+        Format caller information. If ret is None or invalid return an 'N/A' placeholder.
+        """
+        if ret is None:
+            return "N/A"
+        try:
+            return "%s (0x%x)" % (format_offset(ret), int(ret))
+        except Exception:
+            return "%s (0x?)" % format_offset(ret)
 
     def getRegValueFromCtx(self, name, context):
         """
@@ -445,11 +516,18 @@ class FunCapHook(DBG_Hooks):
         valchain_cmt = ""
 
         for reg in regs:
-            valchain_full = format_string % (reg["name"], reg["value"])
-            valchain_cmt = format_string % (reg["name"], reg["value"])
-            prev_memval = reg["value"]
+            # ensure register values are valid integers for formatting
+            value = reg.get("value")
+            if value is None:
+                fmt_value = 0
+            else:
+                fmt_value = int(value)
+            valchain_full = format_string % (reg["name"], fmt_value)
+            valchain_cmt = format_string % (reg["name"], fmt_value)
+            # keep original prev_memval for dereferencing logic
+            prev_memval = reg.get("value")
             if prev_memval != None:
-                memval = getword(reg["value"])
+                memval = getword(prev_memval)
                 if memval != None:
                     next_memval = getword(memval)
                 else:
@@ -473,10 +551,8 @@ class FunCapHook(DBG_Hooks):
                     memval = next_memval
                     next_memval = getword(memval)
 
-            function_name = get_func_off_str(
-                prev_memval
-            )  # no more dereferencing. is this a function ?
-            if function_name:
+            function_name = format_offset(prev_memval)  # no more dereferencing. is this a function ?
+            if function_name and function_name != "N/A":
                 valchain_full += " (%s)" % function_name
                 valchain_cmt += " (%s)" % function_name
             else:  # no, dump data
@@ -543,11 +619,18 @@ class FunCapHook(DBG_Hooks):
         valchain_cmt = ""
 
         for reg in regs:
-            valchain_full = format_string_full % (reg["name"], reg["value"])
-            valchain_cmt = format_string_cmt % (reg["name"], reg["value"])
-            prev_memval = reg["value"]
+            # ensure register values are valid integers for formatting
+            value = reg.get("value")
+            if value is None:
+                fmt_value = 0
+            else:
+                fmt_value = int(value)
+            valchain_full = format_string_full % (reg["name"], fmt_value)
+            valchain_cmt = format_string_cmt % (reg["name"], fmt_value)
+            # keep original prev_memval for dereferencing logic
+            prev_memval = reg.get("value")
             if prev_memval != None:
-                memval = getword(reg["value"])
+                memval = getword(prev_memval)
                 if memval != None:
                     next_memval = getword(memval)
                 else:
@@ -571,10 +654,8 @@ class FunCapHook(DBG_Hooks):
                     memval = next_memval
                     next_memval = getword(memval)
 
-            function_name = get_func_off_str(
-                prev_memval
-            )  # no more dereferencing. is this a function ?
-            if function_name:
+            function_name = format_offset(prev_memval)  # no more dereferencing. is this a function ?
+            if function_name and function_name != "N/A":
                 valchain_full += " (%s)" % function_name
                 valchain_cmt += " (%s)" % function_name
             else:  # no, dump data
@@ -647,11 +728,18 @@ class FunCapHook(DBG_Hooks):
         valchain_cmt = ""
 
         for reg in regs:
-            valchain_full = format_string_full % (reg["name"], reg["value"])
-            valchain_cmt = format_string_cmt % (reg["name"], reg["value"])
-            prev_memval = reg["value"]
+            # ensure register values are valid integers for formatting
+            value = reg.get("value")
+            if value is None:
+                fmt_value = 0
+            else:
+                fmt_value = int(value)
+            valchain_full = format_string_full % (reg["name"], fmt_value)
+            valchain_cmt = format_string_cmt % (reg["name"], fmt_value)
+            # keep original prev_memval for dereferencing logic
+            prev_memval = reg.get("value")
             if prev_memval != None:
-                memval = getword(reg["value"])
+                memval = getword(prev_memval)
                 if memval != None:
                     next_memval = getword(memval)
                 else:
@@ -675,10 +763,8 @@ class FunCapHook(DBG_Hooks):
                     memval = next_memval
                     next_memval = getword(memval)
 
-            function_name = get_func_off_str(
-                prev_memval
-            )  # no more dereferencing. is this a function ?
-            if function_name:
+            function_name = format_offset(prev_memval)  # no more dereferencing. is this a function ?
+            if function_name and function_name != "N/A":
                 valchain_full += " (%s)" % function_name
                 valchain_cmt += " (%s)" % function_name
             else:  # no, dump data
@@ -718,11 +804,17 @@ class FunCapHook(DBG_Hooks):
         if saved_regs:
             for reg in saved_regs:
                 if any(regex.match(reg["name"]) for regex in self.CMT_RET_SAVED_CTX):
-                    valchain_full = format_string_full_s % (reg["name"], reg["value"])
-                    valchain_cmt = format_string_cmt_s % (reg["name"], reg["value"])
-                    prev_memval = reg["value"]
+                    # ensure saved register values are integers for formatting
+                    value = reg.get("value")
+                    if value is None:
+                        fmt_value = 0
+                    else:
+                        fmt_value = int(value)
+                    valchain_full = format_string_full_s % (reg["name"], fmt_value)
+                    valchain_cmt = format_string_cmt_s % (reg["name"], fmt_value)
+                    prev_memval = reg.get("value")
                     if prev_memval != None:
-                        memval = getword(reg["value"])
+                        memval = getword(prev_memval)
                         if memval != None:
                             next_memval = getword(memval)
                         else:
@@ -746,10 +838,8 @@ class FunCapHook(DBG_Hooks):
                             memval = next_memval
                             next_memval = getword(memval)
 
-                    function_name = get_func_off_str(
-                        prev_memval
-                    )  # no more dereferencing. is this a function ?
-                    if function_name:
+                    function_name = format_offset(prev_memval)  # no more dereferencing. is this a function ?
+                    if function_name and function_name != "N/A":
                         valchain_full += " (%s)" % function_name
                         valchain_cmt += " (%s)" % function_name
                     else:  # no, dump data
@@ -902,29 +992,45 @@ class FunCapHook(DBG_Hooks):
     def hex_dump(self, data):
         """
         Utility function that converts data into one-line hex dump format.
-
+    
         @type  data:   Raw Bytes
         @param data:   Raw bytes to view in hex dump
-
+    
         @rtype:  String
         @return: Hex dump of data.
         """
-
+    
         dump = ""
-
-        for byte in data:
-            dump += "%02x " % ord(byte)
-
-        for byte in data:
-            if byte >= 32 and byte <= 126:
-                dump += chr(byte)
+    
+        for b in data:
+            val = b if isinstance(b, int) else ord(b)
+            dump += "%02x " % val
+    
+        for b in data:
+            val = b if isinstance(b, int) else ord(b)
+            if val >= 32 and val <= 126:
+                dump += chr(val)
             else:
                 dump += "."
-
+    
         return dump
 
     def dereference(self, address, size):
-        return ida_idd.dbg_read_memory(address, size)
+        """
+        Safely dereference an address in the debugged process.
+        Validates inputs and returns bytes or None if read fails.
+        """
+        try:
+            if address is None:
+                return None
+            ea = int(address)
+            sz = int(size)
+        except Exception:
+            return None
+        try:
+            return ida_idd.dbg_read_memory(ea, sz)
+        except Exception:
+            return None
 
     def smart_format(self, raw_data, maxlen, print_dots=True):
         """
@@ -1012,7 +1118,7 @@ class FunCapHook(DBG_Hooks):
         """
         Return previous instruction to ea
         """
-        start = get_inf_structure().get_minEA()
+        start = ida_ida.inf_get_min_ea()
         return idc.prev_head(ea, start)
 
     # handlers called from within debug hooks
