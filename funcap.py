@@ -377,7 +377,7 @@ class FunCapHook(DBG_Hooks):
             - get_frame_size(addr)
             + get_func_attr(addr, FUNCATTR_ARGSIZE)
         )
-        return argFrameSize / (self.bits / 8)
+        return argFrameSize // (self.bits // 8)
 
     def get_caller(self):
         return self.prev_ins(self.return_address())
@@ -902,25 +902,27 @@ class FunCapHook(DBG_Hooks):
     def hex_dump(self, data):
         """
         Utility function that converts data into one-line hex dump format.
-
+    
         @type  data:   Raw Bytes
         @param data:   Raw bytes to view in hex dump
-
+    
         @rtype:  String
         @return: Hex dump of data.
         """
-
+    
         dump = ""
-
-        for byte in data:
-            dump += "%02x " % ord(byte)
-
-        for byte in data:
-            if byte >= 32 and byte <= 126:
-                dump += chr(byte)
+    
+        for b in data:
+            val = b if isinstance(b, int) else ord(b)
+            dump += "%02x " % val
+    
+        for b in data:
+            val = b if isinstance(b, int) else ord(b)
+            if val >= 32 and val <= 126:
+                dump += chr(val)
             else:
                 dump += "."
-
+    
         return dump
 
     def dereference(self, address, size):
@@ -1012,7 +1014,7 @@ class FunCapHook(DBG_Hooks):
         """
         Return previous instruction to ea
         """
-        start = get_inf_structure().get_minEA()
+        start = ida_ida.inf_get_min_ea()
         return idc.prev_head(ea, start)
 
     # handlers called from within debug hooks
